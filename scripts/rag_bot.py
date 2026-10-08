@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import re
 import sys
+from functools import lru_cache
 
 from build_index import embed, load_index, search
 
 MIN_SCORE = 0.45
+LOCAL_MODEL = os.getenv("QF_LOCAL_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 SYSTEM = (
     "Ты помощник, который сначала размышляет, а потом отвечает. Всегда пиши свои шаги. "
     "Опирайся только на фрагменты базы. Если ответа в них нет, напиши: Я не знаю."
@@ -151,18 +154,38 @@ def unknown() -> str:
     )
 
 
+@lru_cache(maxsize=1)
+def _llm():
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(LOCAL_MODEL)
+    model = AutoModelForCausalLM.from_pretrained(
+        LOCAL_MODEL, low_cpu_mem_usage=True, dtype=torch.float32
+    )
+    model.eval()
+    return tok, model, torch
+
+
 def complete(prompt: str, fact: tuple[dict, str] | None) -> str:
     if not prompt.startswith("System:"):
         raise RuntimeError("промпт не собран")
     if fact is None:
         return unknown()
-    item, sentence = fact
-    return (
-        "1. Сначала ищу фрагмент базы по вопросу.\n"
-        f"2. В документе «{item['title']}» указано: {sentence}\n"
-        f"3. Следовательно, ответ — {sentence}\n\n"
-        f"{sentence}"
-    )
+    # Генерация ответом LLM по собранному промпту (а не шаблоном из предложения).
+    system, _, user = prompt.partition("\n\n")
+    messages = [
+        {"role": "system", "content": system.removeprefix("System: ").strip()},
+        {"role": "user", "content": user},
+    ]
+    tok, model, torch = _llm()
+    text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = tok(text, return_tensors="pt")
+    with torch.no_grad():
+        out = model.generate(
+            **inputs, max_new_tokens=120, do_sample=False, pad_token_id=tok.eos_token_id
+        )
+    return tok.decode(out[0][inputs["input_ids"].shape[-1] :], skip_special_tokens=True).strip()
 
 
 def ask(query: str, index, chunks, model, guard: bool = True) -> str:
