@@ -1,0 +1,12 @@
+{
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "model_url": "https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "embedding_dim": 384,
+  "vector_db": "FAISS IndexFlatIP",
+  "knowledge_base": "knowledge_base/",
+  "documents": 35,
+  "chunks": 35,
+  "chunk_size_chars": 1000,
+  "chunk_overlap_chars": 150,
+  "elapsed_sec": 3.13
+}
